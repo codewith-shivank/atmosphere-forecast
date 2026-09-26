@@ -38,6 +38,12 @@ jobs:
           npm run build
           touch ./dist/.nojekyll
 
+      - name: Deploy to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
