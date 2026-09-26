@@ -5,9 +5,11 @@ import {defineConfig} from 'vite';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  base: '/atmosphere-forecast/',
   resolve: {
     alias: {
       '@': path.resolve(__dirname, '.'),
     },
   },
 });
+
