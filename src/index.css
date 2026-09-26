@@ -1,0 +1,121 @@
+@import "tailwindcss";
+
+@theme {
+  /* ── Primary palette ── */
+  --color-brand: 222 84% 56%;      /* blue-500  */
+  --color-brand-hover: 220 84% 52%;
+  --color-brand-focus: 222 84% 56%;
+
+  /* ── Semantic status colors ── */
+  --color-success: 152 62% 45%;    /* green-500 */
+  --color-warning: 38 92% 50%;     /* yellow-400 */
+  --color-error: 0 84% 60%;        /* red-500  */
+
+  /* ── Extended neutrals ── */
+  --color-bg: 0 0% 100%;
+  --color-bg-alt: 220 20% 97%;
+  --color-surface: 0 0% 100%;
+  --color-border: 220 20% 92%;
+  --color-border-alt: 220 15% 84%;
+  --color-text-primary: 220 20% 10%;
+  --color-text-secondary: 220 15% 30%;
+  --color-text-tertiary: 220 10% 50%;
+
+  /* dark mode overrides */
+  --tw-colors-background: var(--color-bg);
+  --tw-colors-foreground: var(--color-text-primary);
+}
+
+/* Dark mode token set */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: 220 17% 8%;
+    --color-bg-alt: 220 17% 12%;
+    --color-surface: 220 24% 14%;
+    --color-border: 220 20% 22%;
+    --color-border-alt: 220 15% 28%;
+    --color-text-primary: 220 10% 92%;
+    --color-text-secondary: 220 10% 72%;
+    --color-text-tertiary: 220 10% 50%;
+  }
+}
+
+/* Explicit dark class overrides the media query */
+html.dark {
+  --color-bg: 220 17% 8%;
+  --color-bg-alt: 220 17% 12%;
+  --color-surface: 220 24% 14%;
+  --color-border: 220 20% 22%;
+  --color-border-alt: 220 15% 28%;
+  --color-text-primary: 220 10% 92%;
+  --color-text-secondary: 220 10% 72%;
+  --color-text-tertiary: 220 10% 50%;
+}
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: hsl(var(--color-bg));
+    color: hsl(var(--color-text-primary));
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Custom scrollbar for WebKit */
+  &::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: hsl(var(--color-border));
+    border-radius: 4px;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--color-border-alt));
+  }
+
+  /* Selection */
+  ::selection {
+    background: hsl(var(--color-brand) / 0.2);
+  }
+
+  /* Smooth text rendering */
+  html {
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "liga" 1, "calt" 1;
+  }
+}
+
+@layer utilities {
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Glassmorphism card base for surfaces that sit on colored backgrounds */
+  .surface {
+    background-color: hsl(var(--color-surface));
+    border-color: hsl(var(--color-border));
+  }
+
+  /* Focus ring for keyboard users */
+  .focus-ring {
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+  }
+  .focus-ring:focus-visible {
+    outline: 2px solid hsl(var(--color-brand));
+    outline-offset: 3px;
+  }
+
+  /* Temperature range bar gradient */
+  .temp-range-bg {
+    background: linear-gradient(90deg, hsl(200 80% 58%) 0%, hsl(45 90% 55%) 100%);
+  }
+}
