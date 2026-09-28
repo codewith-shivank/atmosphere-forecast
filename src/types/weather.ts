@@ -60,6 +60,18 @@ export interface WeatherData {
   updatedAt: string;
 }
 
+export interface AirQualityData {
+  europeanAqi: number;
+  usAqi: number;
+  pm25: number;
+  pm10: number;
+  nitrogenDioxide: number;
+  sulphurDioxide: number;
+  ozone: number;
+  carbonMonoxide: number;
+  updatedAt: string;
+}
+
 export interface UnitConversion {
   temp: (celsius: number, unit: Unit) => number;
   wind: (kmh: number, unit: Unit) => number;

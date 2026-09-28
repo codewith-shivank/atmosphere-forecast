@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchWeatherData, reverseGeocode } from '../services/weatherApi';
-import { Location, Unit, WeatherData } from '../types/weather';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { fetchAirQuality, fetchWeatherData, reverseGeocode } from '../services/weatherApi';
+import { AirQualityData, Location, Unit, WeatherData } from '../types/weather';
+import { geolocationErrorMessage, GpsFix, locateLikeMaps } from '../utils/geolocation';
 
-const DEFAULT_LOCATION: Location = {
+export const DEFAULT_LOCATION: Location = {
   name: 'San Francisco',
   admin1: 'California',
   country: 'United States',
@@ -16,126 +18,152 @@ const STORAGE_KEYS = {
   UNIT: 'atmosphere_temp_unit',
 } as const;
 
-// In-memory cache: keyed by lat,lng — valid for 2 minutes
-const CACHE_TTL = 2 * 60 * 1000;
-const weatherCache = new Map<string, { data: WeatherData; timestamp: number }>();
-
-function cacheKey(loc: Location): string {
-  return `${loc.latitude.toFixed(4)},${loc.longitude.toFixed(4)}`;
-}
-
-function clearExpiredCache() {
-  const now = Date.now();
-  for (const [key, entry] of weatherCache.entries()) {
-    if (now - entry.timestamp > CACHE_TTL) {
-      weatherCache.delete(key);
-    }
-  }
-}
-
 function getSavedUnit(): Unit {
   try {
+    const urlParams = new URLSearchParams(window.location.search);
+    const unitParam = urlParams.get('unit');
+    if (unitParam === 'celsius' || unitParam === 'fahrenheit') return unitParam;
+
     const saved = localStorage.getItem(STORAGE_KEYS.UNIT);
     if (saved === 'celsius' || saved === 'fahrenheit') return saved;
   } catch {
-    // ignore storage access errors
+    // ignore
   }
   return 'celsius';
 }
 
-function getSavedLocation(): Location {
+function hasExplicitUrlLocation(): boolean {
   try {
+    const urlParams = new URLSearchParams(window.location.search);
+    const lat = parseFloat(urlParams.get('lat') || '');
+    const lon = parseFloat(urlParams.get('lon') || '');
+    return Number.isFinite(lat) && Number.isFinite(lon);
+  } catch {
+    return false;
+  }
+}
+
+function hasSavedLocation(): boolean {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEYS.LOCATION);
+    if (!saved) return false;
+    const parsed = JSON.parse(saved);
+    return Boolean(parsed?.latitude && parsed?.longitude && parsed?.name);
+  } catch {
+    return false;
+  }
+}
+
+function getInitialLocation(): Location {
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    const lat = urlParams.get('lat');
+    const lon = urlParams.get('lon');
+    const city = urlParams.get('city');
+
+    if (lat && lon) {
+      const latitude = parseFloat(lat);
+      const longitude = parseFloat(lon);
+      if (!isNaN(latitude) && !isNaN(longitude)) {
+        return {
+          name: city || 'Selected Location',
+          country: urlParams.get('country') || '',
+          admin1: urlParams.get('admin1') || undefined,
+          latitude,
+          longitude,
+        };
+      }
+    }
+
     const saved = localStorage.getItem(STORAGE_KEYS.LOCATION);
     if (saved) {
       const parsed = JSON.parse(saved);
-      // Validate required fields before trusting the stored value
       if (parsed?.latitude && parsed?.longitude && parsed?.name && typeof parsed?.country === 'string') {
         return parsed as Location;
       }
     }
   } catch {
-    // ignore parse / storage errors
+    // ignore
   }
   return DEFAULT_LOCATION;
 }
 
 export function useWeather() {
-  const [weather, setWeather] = useState<WeatherData | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const [currentLocation, setCurrentLocation] = useState<Location>(getInitialLocation);
   const [unit, setUnitState] = useState<Unit>(getSavedUnit);
-  const [currentLocation, setCurrentLocation] = useState<Location>(getSavedLocation);
+  const [geoError, setGeoError] = useState<string | null>(null);
+  const [gpsFix, setGpsFix] = useState<GpsFix | null>(null);
+  const [isLocating, setIsLocating] = useState(false);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const watchIdRef = useRef<number | null>(null);
+  const followRef = useRef(false);
 
-  // Keep a ref to the current location so callbacks can always read the latest
-  // without needing to be recreated every time location changes.
-  const currentLocationRef = useRef<Location>(currentLocation);
+  // Sync state with URL search parameters
   useEffect(() => {
-    currentLocationRef.current = currentLocation;
-  }, [currentLocation]);
-
-  const setUnit = useCallback((newUnit: Unit) => {
-    setUnitState(newUnit);
     try {
-      localStorage.setItem(STORAGE_KEYS.UNIT, newUnit);
+      const url = new URL(window.location.href);
+      url.searchParams.set('city', currentLocation.name);
+      url.searchParams.set('lat', currentLocation.latitude.toFixed(4));
+      url.searchParams.set('lon', currentLocation.longitude.toFixed(4));
+      url.searchParams.set('unit', unit);
+      if (currentLocation.country) {
+        url.searchParams.set('country', currentLocation.country);
+      }
+      window.history.replaceState({}, '', url.toString());
+      localStorage.setItem(STORAGE_KEYS.LOCATION, JSON.stringify(currentLocation));
+      localStorage.setItem(STORAGE_KEYS.UNIT, unit);
     } catch {
       // ignore
     }
+  }, [currentLocation, unit]);
+
+  // TanStack Query for Weather Data
+  const weatherQuery = useQuery<WeatherData, Error>({
+    queryKey: ['weather', currentLocation.latitude.toFixed(4), currentLocation.longitude.toFixed(4)],
+    queryFn: ({ signal }) => fetchWeatherData(currentLocation),
+    staleTime: 5 * 60 * 1000, // 5 minutes fresh
+    gcTime: 30 * 60 * 1000, // 30 minutes in memory
+    retry: 2,
+    refetchOnWindowFocus: false,
+  });
+
+  // TanStack Query for Air Quality Data
+  const airQualityQuery = useQuery<AirQualityData, Error>({
+    queryKey: ['airQuality', currentLocation.latitude.toFixed(4), currentLocation.longitude.toFixed(4)],
+    queryFn: ({ signal }) => fetchAirQuality(currentLocation.latitude, currentLocation.longitude, signal),
+    staleTime: 10 * 60 * 1000, // 10 minutes fresh
+    gcTime: 30 * 60 * 1000,
+    retry: 1,
+    refetchOnWindowFocus: false,
+  });
+
+  const setUnit = useCallback((newUnit: Unit) => {
+    setUnitState(newUnit);
   }, []);
 
-  const loadWeather = useCallback(async (loc: Location, force = false) => {
-    const key = cacheKey(loc);
-
-    // Check in-memory cache first (unit changes are display-only — raw data is unit-agnostic)
-    clearExpiredCache();
-    if (!force) {
-      const cached = weatherCache.get(key);
-      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-        setWeather(cached.data);
-        setCurrentLocation(loc);
-        setError(null);
-        return;
-      }
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const data = await fetchWeatherData(loc);
-
-      weatherCache.set(key, { data, timestamp: Date.now() });
-
-      setWeather(data);
-      setCurrentLocation(loc);
-      try {
-        localStorage.setItem(STORAGE_KEYS.LOCATION, JSON.stringify(loc));
-      } catch {
-        // ignore
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch weather data';
-      setError(message);
-    } finally {
-      setLoading(false);
-    }
-  }, []); // no deps — fetchWeatherData is stable, cache is module-level
-
   const selectLocation = useCallback((loc: Location) => {
-    loadWeather(loc);
-  }, [loadWeather]);
+    setGeoError(null);
+    setCurrentLocation(loc);
+  }, []);
 
   const refresh = useCallback(() => {
-    loadWeather(currentLocationRef.current, true);
-  }, [loadWeather]);
+    setGeoError(null);
+    queryClient.invalidateQueries({
+      queryKey: ['weather', currentLocation.latitude.toFixed(4), currentLocation.longitude.toFixed(4)],
+    });
+    queryClient.invalidateQueries({
+      queryKey: ['airQuality', currentLocation.latitude.toFixed(4), currentLocation.longitude.toFixed(4)],
+    });
+  }, [queryClient, currentLocation]);
 
   const detectLocation = useCallback(() => {
     if (!navigator.geolocation) {
-      setError('Geolocation is not supported by your browser.');
+      setGeoError('Geolocation is not supported by your browser.');
       return;
     }
 
-    setLoading(true);
-    setError(null);
+    setGeoError(null);
 
     navigator.geolocation.getCurrentPosition(
       async (position) => {
@@ -149,10 +177,9 @@ export function useWeather() {
             latitude,
             longitude,
           };
-          await loadWeather(loc);
+          selectLocation(loc);
         } catch {
-          // If reverse geocoding fails, still show weather with coordinates only
-          await loadWeather({
+          selectLocation({
             name: 'Current Location',
             country: '',
             latitude,
@@ -160,31 +187,29 @@ export function useWeather() {
           });
         }
       },
-      (geoError) => {
+      (err) => {
         let message = 'Unable to retrieve your current location.';
-        if (geoError.code === geoError.PERMISSION_DENIED) {
-          message = 'Location permission denied. Please search for a city instead.';
-        } else if (geoError.code === geoError.POSITION_UNAVAILABLE) {
-          message = 'Location information is unavailable. Please try again.';
-        } else if (geoError.code === geoError.TIMEOUT) {
-          message = 'Location request timed out. Check your connection and try again.';
+        if (err.code === err.PERMISSION_DENIED) {
+          message = 'Location permission denied. Please search for a city manually.';
+        } else if (err.code === err.POSITION_UNAVAILABLE) {
+          message = 'Location information is unavailable.';
+        } else if (err.code === err.TIMEOUT) {
+          message = 'Location request timed out.';
         }
-        setError(message);
-        setLoading(false);
+        setGeoError(message);
       },
       { timeout: 10000, maximumAge: 60000 },
     );
-  }, [loadWeather]);
+  }, [selectLocation]);
 
-  // Initial load — runs once on mount using the resolved starting location
-  useEffect(() => {
-    loadWeather(currentLocationRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const error = geoError || weatherQuery.error?.message || null;
 
   return {
-    weather,
-    loading,
+    weather: weatherQuery.data ?? null,
+    airQuality: airQualityQuery.data ?? null,
+    loading: weatherQuery.isLoading || (weatherQuery.isFetching && !weatherQuery.data),
+    isFetching: weatherQuery.isFetching,
+    airQualityLoading: airQualityQuery.isLoading,
     error,
     unit,
     currentLocation,

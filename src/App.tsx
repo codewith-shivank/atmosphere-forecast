@@ -1,10 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { ArrowLeftRight, Camera } from 'lucide-react';
+import { AirQualityCard } from './components/AirQualityCard';
+import { CompareModal } from './components/CompareModal';
 import { CurrentWeather } from './components/CurrentWeather';
 import { DailyForecast } from './components/DailyForecast';
 import { ErrorMessage } from './components/ErrorMessage';
+import { ExportCardModal } from './components/ExportCardModal';
 import { Header } from './components/Header';
 import { HourlyForecast } from './components/HourlyForecast';
+import { ShareButton } from './components/ShareButton';
+import { WeatherAlerts } from './components/WeatherAlerts';
+import { WeatherChart } from './components/WeatherChart';
+import { WeatherMap } from './components/WeatherMap';
 import { WeatherSkeleton } from './components/WeatherSkeleton';
 import { useWeather } from './hooks/useWeather';
 import { Location } from './types/weather';
@@ -14,9 +22,11 @@ type Theme = 'light' | 'dark' | 'system';
 export default function App() {
   const {
     weather,
+    airQuality,
     loading,
     error,
     unit,
+    currentLocation,
     setUnit,
     selectLocation,
     detectLocation,
@@ -28,10 +38,13 @@ export default function App() {
       const saved = localStorage.getItem('atmosphere_theme');
       if (saved === 'light' || saved === 'dark' || saved === 'system') return saved;
     } catch {
-      // ignore storage errors in restricted environments
+      // ignore
     }
     return 'system';
   });
+
+  const [isCompareOpen, setIsCompareOpen] = useState(false);
+  const [isExportOpen, setIsExportOpen] = useState(false);
 
   useEffect(() => {
     const root = window.document.documentElement;
@@ -41,7 +54,6 @@ export default function App() {
       } else if (theme === 'dark') {
         root.classList.add('dark');
       } else {
-        // system: follow OS preference
         if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
           root.classList.add('dark');
         } else {
@@ -52,7 +64,6 @@ export default function App() {
 
     applyTheme();
 
-    // Update when OS preference changes (only relevant in system mode)
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const handleOsChange = () => {
       if (theme === 'system') applyTheme();
@@ -68,16 +79,19 @@ export default function App() {
     return () => mediaQuery.removeEventListener('change', handleOsChange);
   }, [theme]);
 
-  const handleLocationSelect = useCallback((loc: Location) => {
-    selectLocation(loc);
-  }, [selectLocation]);
+  const handleLocationSelect = useCallback(
+    (loc: Location) => {
+      selectLocation(loc);
+    },
+    [selectLocation],
+  );
 
   const handleThemeChange = useCallback((newTheme: 'light' | 'dark' | 'system') => {
     setTheme(newTheme);
   }, []);
 
   return (
-    <div className="min-h-screen flex flex-col bg-zinc-50 dark:bg-zinc-900">
+    <div className="min-h-screen flex flex-col bg-zinc-50 dark:bg-zinc-900 transition-colors">
       <Header
         unit={unit}
         onUnitChange={setUnit}
@@ -116,6 +130,45 @@ export default function App() {
               </div>
             )}
 
+            {/* Location Header & Multi-action Bar */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+                  {weather.location.name}
+                  {weather.location.country ? `, ${weather.location.country}` : ''}
+                </h1>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                  Live meteorological conditions & atmosphere telemetry
+                </p>
+              </div>
+
+              {/* Action Toolbar */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setIsCompareOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-medium transition-all shadow-xs focus-ring"
+                >
+                  <ArrowLeftRight className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>Compare</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsExportOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-medium transition-all shadow-xs focus-ring"
+                >
+                  <Camera className="w-3.5 h-3.5 text-sky-500" />
+                  <span>Export</span>
+                </button>
+
+                <ShareButton location={weather.location} unit={unit} />
+              </div>
+            </div>
+
+            {/* Automated Weather & Atmospheric Hazard Alerts */}
+            <WeatherAlerts current={weather.current} airQuality={airQuality} unit={unit} />
+
             <AnimatePresence mode="wait">
               <motion.div
                 key={`${weather.location.latitude.toFixed(2)}-${weather.location.longitude.toFixed(2)}`}
@@ -125,6 +178,7 @@ export default function App() {
                 transition={{ duration: 0.2 }}
                 className="space-y-6"
               >
+                {/* 1. Real-time Weather Overview */}
                 <CurrentWeather
                   current={weather.current}
                   location={weather.location}
@@ -132,11 +186,46 @@ export default function App() {
                   updatedAt={weather.updatedAt}
                 />
 
+                {/* 2. Air Quality Index & Pollutants */}
+                <AirQualityCard airQuality={airQuality} />
+
+                {/* 3. Interactive Temperature & Precipitation Curve */}
+                <WeatherChart items={weather.hourly} unit={unit} />
+
+                {/* 4. Hourly Forecast Horizontal Cards */}
                 <HourlyForecast items={weather.hourly} unit={unit} />
 
+                {/* 5. 7-Day Extended Forecast */}
                 <DailyForecast items={weather.daily} unit={unit} />
+
+                {/* 6. Interactive Weather & Radar Map */}
+                <WeatherMap
+                  location={weather.location}
+                  weather={weather}
+                  unit={unit}
+                  theme={theme}
+                />
               </motion.div>
             </AnimatePresence>
+
+            {/* Multi-City Comparison Modal */}
+            <CompareModal
+              isOpen={isCompareOpen}
+              onClose={() => setIsCompareOpen(false)}
+              baseLocation={weather.location}
+              baseWeather={weather}
+              unit={unit}
+            />
+
+            {/* Export Snapshot Modal */}
+            <ExportCardModal
+              isOpen={isExportOpen}
+              onClose={() => setIsExportOpen(false)}
+              location={weather.location}
+              weather={weather}
+              airQuality={airQuality}
+              unit={unit}
+            />
           </div>
         )}
       </main>
@@ -146,7 +235,8 @@ export default function App() {
           <div className="flex items-center gap-2">
             <span className="font-medium text-zinc-900 dark:text-zinc-100">Atmosphere Weather</span>
             <div className="w-px h-3.5 bg-zinc-200 dark:bg-zinc-700" aria-hidden="true" />
-            <span>Made with ♥ by{' '}
+            <span>
+              Made with ♥ by{' '}
               <a
                 href="https://github.com/codewithshivank"
                 target="_blank"
@@ -159,7 +249,8 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
-            <span>Powered by{' '}
+            <span>
+              Powered by{' '}
               <a
                 href="https://open-meteo.com"
                 target="_blank"

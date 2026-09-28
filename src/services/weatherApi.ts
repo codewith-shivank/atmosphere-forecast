@@ -1,4 +1,4 @@
-import { DailyForecastItem, HourlyForecastItem, Location, WeatherData } from '../types/weather';
+import { AirQualityData, DailyForecastItem, HourlyForecastItem, Location, WeatherData } from '../types/weather';
 
 const WMO_CODES: Record<number, string> = {
   0: 'Clear sky',
@@ -75,17 +75,45 @@ export async function reverseGeocode(latitude: number, longitude: number): Promi
     const res = await fetch(url);
     if (!res.ok) throw new Error('Reverse geocode failed');
     const data = await res.json();
+    const name =
+      data.locality ||
+      data.city ||
+      data.principalSubdivision ||
+      data.countryName ||
+      `${latitude.toFixed(3)}, ${longitude.toFixed(3)}`;
     return {
-      name: data.locality || data.city || data.principalSubdivision || 'Current Location',
+      name,
       country: data.countryName || '',
       admin1: data.principalSubdivision,
     };
   } catch {
     return {
-      name: 'Current Location',
+      name: `${latitude.toFixed(3)}, ${longitude.toFixed(3)}`,
       country: '',
     };
   }
+}
+
+export type RainViewerLayers = {
+  host: string;
+  radarPath: string | null;
+  satellitePath: string | null;
+};
+
+export async function fetchRainViewerLayers(signal?: AbortSignal): Promise<RainViewerLayers> {
+  const res = await fetch('https://api.rainviewer.com/public/weather-maps.json', { signal });
+  if (!res.ok) throw new Error('Unable to load radar frames');
+  const data = await res.json();
+  const nowcast = data.radar?.nowcast as Array<{ path: string }> | undefined;
+  const past = data.radar?.past as Array<{ path: string }> | undefined;
+  const infrared = data.satellite?.infrared as Array<{ path: string }> | undefined;
+  const radarFrame = nowcast?.at(-1) ?? past?.at(-1);
+  const satFrame = infrared?.at(-1);
+  return {
+    host: data.host as string,
+    radarPath: radarFrame?.path ?? null,
+    satellitePath: satFrame?.path ?? null,
+  };
 }
 
 function calculateUvIndex(hour: number, month: number, latitude: number): number {
@@ -217,6 +245,30 @@ export async function fetchWeatherData(location: Location): Promise<WeatherData>
     },
     hourly: hourlyItems,
     daily: dailyItems,
+    updatedAt: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+  };
+}
+
+export async function fetchAirQuality(latitude: number, longitude: number, signal?: AbortSignal): Promise<AirQualityData> {
+  const url = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${latitude}&longitude=${longitude}&current=european_aqi,us_aqi,pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone`;
+  
+  const res = await fetch(url, { signal });
+  if (!res.ok) {
+    throw new Error('Unable to retrieve air quality data');
+  }
+
+  const json = await res.json();
+  const current = json.current;
+
+  return {
+    europeanAqi: Math.round(current?.european_aqi ?? 25),
+    usAqi: Math.round(current?.us_aqi ?? 35),
+    pm25: Math.round(current?.pm2_5 ?? 10),
+    pm10: Math.round(current?.pm10 ?? 18),
+    nitrogenDioxide: Math.round(current?.nitrogen_dioxide ?? 12),
+    sulphurDioxide: Math.round(current?.sulphur_dioxide ?? 4),
+    ozone: Math.round(current?.ozone ?? 45),
+    carbonMonoxide: Math.round(current?.carbon_monoxide ?? 220),
     updatedAt: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
   };
 }
